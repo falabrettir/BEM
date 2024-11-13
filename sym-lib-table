@@ -1,6 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "New_Library")(type "KiCad")(uri "${KIPRJMOD}/New_Library.kicad_sym")(options "")(descr ""))
-  (lib (name "BEMLIB")(type "KiCad")(uri "${KIPRJMOD}/BEMLIB.kicad_sym")(options "")(descr ""))
-  (lib (name "BEMLibrary")(type "KiCad")(uri "${KIPRJMOD}/BEMLibrary.kicad_sym")(options "")(descr ""))
-)
