@@ -3,7 +3,7 @@
 #include "SD.h"
 #include "SPI.h"
 #include <ACS712XX.h>
-#include<ZMPT101B.h>
+#include <ZMPT101B.h>
 #include "time.h"
 
 const char* ssid = "xiaomiFelipe";
@@ -13,7 +13,7 @@ const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 0;
 const int   daylightOffset_sec = 3600;
 
-WiFiServer server(80);
+WifiServer server(80);
 
 String header;
 #define tam_vetor 300
