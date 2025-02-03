@@ -41,6 +41,8 @@ bool tomadaState[num_tomadas] = {false, false, false, false};
 //Tomada 1;
 ZMPT101B sensor_tensao_1(pinos_tensao[0]);
 ACS712XX sensor_corrente_1(ACS712_30A,pinos_tensao[0]);
+sensor_tensao_1.calibrate();
+sensor_corrente_1.autoCalibrate();
 
 float vetor_tensao_1[tam_vetor];
 float vetor_corrente_1[tam_vetor];
@@ -53,6 +55,9 @@ const char * arquivo_potencia_1 = "/arquivo_potencia_1.txt";
 //Tomada 2;
 ZMPT101B sensor_tensao_2(pinos_tensao[1]);
 ACS712XX sensor_corrente_2(ACS712_30A,pinos_tensao[1]);
+sensor_tensao_2.calibrate();
+sensor_corrente_2.autoCalibrate();
+
 
 float vetor_tensao_2[tam_vetor];
 float vetor_corrente_2[tam_vetor];
@@ -65,6 +70,9 @@ const char * arquivo_potencia_2 = "/arquivo_potencia_2.txt";
 //Tomada 3;
 ZMPT101B sensor_tensao_3(pinos_tensao[2]);
 ACS712XX sensor_corrente_3(ACS712_30A,pinos_tensao[2]);
+sensor_tensao_3.calibrate();
+sensor_corrente_3.autoCalibrate();
+
 
 float vetor_tensao_3[tam_vetor];
 float vetor_corrente_3[tam_vetor];
@@ -77,6 +85,9 @@ const char * arquivo_potencia_3 = "/arquivo_potencia_3.txt";
 //Tomada 4;
 ZMPT101B sensor_tensao_4(pinos_tensao[3]);
 ACS712XX sensor_corrente_4(ACS712_30A,pinos_tensao[3]);
+sensor_tensao_4.calibrate();
+sensor_corrente_4.autoCalibrate();
+
 
 float vetor_tensao_4[tam_vetor];
 float vetor_corrente_4[tam_vetor];
