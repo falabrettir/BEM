@@ -1,21 +1,21 @@
 #include <WiFi.h>
+#include <WiFiServer.h>
 #include "FS.h"
-#include "SD.h"
+//#include "SD.h"
 #include "SPI.h"
 #include <ACS712XX.h>
-#include <ZMPT101B.h>
+#include<ZMPT101B.h>
 #include "time.h"
 
+// Replace with your network credentials
 const char* ssid = "xiaomiFelipe";
-const char* password = "12345678";
+const char* password = "123456789";
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 0;
 const int   daylightOffset_sec = 3600;
 
-WifiServer server(80);
-
-String header;
+#define num_tomadas 4
 #define tam_vetor 300
 
 static int pos = 0;
@@ -24,25 +24,24 @@ static int comeco = 0;
 static int hora_atual;
 static int min_atual;
 
-//Inicializacao de cada tomada
+int pinos_tensao[num_tomadas] = {35, 34, 5, 4};
+int pinos_corrente[num_tomadas] = {26, 27, 32, 33};
+int pinos_rele[num_tomadas] = {15, 4, 16, 17};
+int horas_ligar[num_tomadas] = {-1, -1, -1, -1};
+int horas_desligar[num_tomadas] = {-1, -1, -1, -1}; 
+int mins_ligar[num_tomadas] = {-1, -1, -1, -1};
+int mins_desligar[num_tomadas] = {-1, -1, -1, -1};
+
+float tensao[num_tomadas] = {-1, -1, -1, -1}; 
+float corrente[num_tomadas] = {-1, -1, -1, -1}; 
+float potencia[num_tomadas] = {-1, -1, -1, -1};
+
+bool tomadaState[num_tomadas] = {false, false, false, false};
 
 //Tomada 1;
+ZMPT101B sensor_tensao_1(pinos_tensao[0]);
+ACS712XX sensor_corrente_1(ACS712_30A,pinos_tensao[0]);
 
-int pino_tensao_1 = 0;
-int pino_corrente_1 = 0;
-int pino_rele_1 = 32;
-
-int hora_ligar_1 = -1;
-int min_ligar_1 = -1;
-int hora_desligar_1 = -1;
-int min_desligar_1 = -1;
-
-ZMPT101B sensor_tensao_1(pino_tensao_1);
-ACS712XX sensor_corrente_1(ACS712_30A,pino_corrente_1);
-
-float tensao_1;
-float corrente_1;
-float potencia_1;
 
 float vetor_tensao_1[tam_vetor];
 float vetor_corrente_1[tam_vetor];
@@ -53,22 +52,10 @@ const char * arquivo_corrente_1 = "/arquivo_corrente_1.txt";
 const char * arquivo_potencia_1 = "/arquivo_potencia_1.txt";
 
 //Tomada 2;
+ZMPT101B sensor_tensao_2(pinos_tensao[1]);
+ACS712XX sensor_corrente_2(ACS712_30A,pinos_tensao[1]);
 
-int pino_tensao_2 = 0;
-int pino_corrente_2 = 0;
-int pino_rele_2 = 33;
 
-int hora_ligar_2 = -1;
-int min_ligar_2 = -1;
-int hora_desligar_2 = -1;
-int min_desligar_2 = -1;
-
-ZMPT101B sensor_tensao_2(pino_tensao_2);
-ACS712XX sensor_corrente_2(ACS712_30A,pino_corrente_2);
-
-float tensao_2;
-float corrente_2;
-float potencia_2;
 
 float vetor_tensao_2[tam_vetor];
 float vetor_corrente_2[tam_vetor];
@@ -79,22 +66,10 @@ const char * arquivo_corrente_2 = "/arquivo_corrente_2.txt";
 const char * arquivo_potencia_2 = "/arquivo_potencia_2.txt";
 
 //Tomada 3;
+ZMPT101B sensor_tensao_3(pinos_tensao[2]);
+ACS712XX sensor_corrente_3(ACS712_30A,pinos_tensao[2]);
 
-int pino_tensao_3 = 0;
-int pino_corrente_3 = 0;
-int pino_rele_3 = 26;
 
-int hora_ligar_3 = -1;
-int min_ligar_3 = -1;
-int hora_desligar_3 = -1;
-int min_desligar_3 = -1;
-
-ZMPT101B sensor_tensao_3(pino_tensao_3);
-ACS712XX sensor_corrente_3(ACS712_30A,pino_corrente_3);
-
-float tensao_3;
-float corrente_3;
-float potencia_3;
 
 float vetor_tensao_3[tam_vetor];
 float vetor_corrente_3[tam_vetor];
@@ -105,22 +80,10 @@ const char * arquivo_corrente_3 = "/arquivo_corrente_3.txt";
 const char * arquivo_potencia_3 = "/arquivo_potencia_3.txt";
 
 //Tomada 4;
+ZMPT101B sensor_tensao_4(pinos_tensao[3]);
+ACS712XX sensor_corrente_4(ACS712_30A,pinos_tensao[3]);
 
-int pino_tensao_4 = 0;
-int pino_corrente_4 = 0;
-int pino_rele_4 = 27;
 
-int hora_ligar_4 = -1;
-int min_ligar_4 = -1;
-int hora_desligar_4 = -1;
-int min_desligar_4 = -1;
-
-ZMPT101B sensor_tensao_4(pino_tensao_4);
-ACS712XX sensor_corrente_4(ACS712_30A,pino_corrente_4);
-
-float tensao_4;
-float corrente_4;
-float potencia_4;
 
 float vetor_tensao_4[tam_vetor];
 float vetor_corrente_4[tam_vetor];
@@ -132,713 +95,445 @@ const char * arquivo_potencia_4 = "/arquivo_potencia_4.txt";
 
 File file;
 
-unsigned long currentTime = millis();
-unsigned long previousTime = 0; 
-const long timeoutTime = 2000;
-
-//Metodo para pegar os horarios de ligar/desligar
-String getParam(String header, String param) {
-  int index = header.indexOf(param + "=");
-  if (index == -1) return "";
-  int start = index + param.length() + 1;
-  int end = header.indexOf("&", start);
-  if (end == -1) end = header.indexOf(" ", start);
-  return header.substring(start, end);
-}
-
-//Metodos para utilizar o SD Card
-void writeFile(fs::FS &fs, const char * path, double message){
-  //Serial.printf("Writing file: %s\n", path);
-
-  File file = fs.open(path, FILE_WRITE);
-  if(!file){
-    Serial.println("Failed to open file for writing");
-    return;
-  }
-  if(file.println(message)){
-    //Serial.println("File written");
-  } else {
-    Serial.println("Write failed");
-  }
-  file.close();
-}
-
-void appendFile(fs::FS &fs, const char * path, double message){
-  //Serial.printf("Appending to file: %s\n", path);
-
-  File file = fs.open(path, FILE_APPEND);
-  if(!file){
-    //Serial.println("Failed to open file for appending");
-    return;
-  }
-  if(file.println(message)){
-    //Serial.println("Message appended");
-  } else {
-    Serial.println("Append failed");
-  }
-  file.close();
-}
-
-void deleteFile(fs::FS &fs, const char *path) {
-  //Serial.printf("Deleting file: %s\n", path);
-  if (fs.remove(path)) {
-    //Serial.println("File deleted");
-  } else {
-    Serial.println("Delete failed");
-  }
-}
-
-void readFile(fs::FS &fs, const char *path) {
-  Serial.printf("Reading file: %s\n", path);
-
-  File file = fs.open(path);
-  if (!file) {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
-
-  Serial.print("Read from file: ");
-  while (file.available()) {
-    Serial.write(file.read());
-  }
-  file.close();
-}
-//Fim dos Metodos para utilizar o SD Card
+// Create a WiFi server on port 80 (HTTP)
+WiFiServer server(80);
 
 void setup() {
+  // Start the serial monitor
+  Serial.begin(115200);
 
-  Serial.begin(9600);
+  sensor_tensao_1.setZeroPoint(0);
+sensor_corrente_1.setOffset(0.0f);
 
-  sensor_tensao_1.calibrate();
-  sensor_tensao_2.calibrate();
-  sensor_tensao_3.calibrate();
-  sensor_tensao_4.calibrate();
+sensor_tensao_2.setZeroPoint(0);
+sensor_corrente_2.setOffset(0.0f);
 
-  pinMode(pino_rele_1, OUTPUT);
-  pinMode(pino_rele_2, OUTPUT);
-  pinMode(pino_rele_3, OUTPUT);
-  pinMode(pino_rele_4, OUTPUT);
+sensor_tensao_3.setZeroPoint(0);
+sensor_corrente_3.setOffset(0.0f);
 
-  hora_ligar_1 = -1;
-  min_ligar_1 = -1;
-  hora_desligar_1 = -1;
-  min_desligar_1 = -1;
+sensor_tensao_4.setZeroPoint(3100);
+sensor_corrente_4.setOffset(2600);
 
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+
+  pinMode(pinos_rele[0], OUTPUT);
+  pinMode(pinos_rele[1], OUTPUT);
+  pinMode(pinos_rele[2], OUTPUT);
+  pinMode(pinos_rele[3], OUTPUT);
+  
+  // Connect to Wi-Fi
+  Serial.println("Connecting to WiFi...");
   WiFi.begin(ssid, password);
+  
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
   }
 
-  Serial.println("");
-  Serial.println("WiFi connected.");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("Connected to WiFi!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());  // Print the IP address
+
+  // Start the server
   server.begin();
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-
-
-  if(!SD.begin(5)){
-    Serial.println("Card Mount Failed");
-    return;
-  }
-  uint8_t cardType = SD.cardType();
-  if(cardType == CARD_NONE){
-    Serial.println("No SD card attached");
-    return;
-  }
-
-  for(int i = 0; i < tam_vetor; i++){
-    vetor_tensao_1[i] = -1;
-    vetor_corrente_1[i] = -1;
-    vetor_potencia_1[i] = -1;
-
-    vetor_tensao_2[i] = -1;
-    vetor_corrente_2[i] = -1;
-    vetor_potencia_2[i] = -1;
-
-    vetor_tensao_3[i] = -1;
-    vetor_corrente_3[i] = -1;
-    vetor_potencia_3[i] = -1;
-
-    vetor_tensao_4[i] = -1;
-    vetor_corrente_4[i] = -1;
-    vetor_potencia_4[i] = -1;
-  }
-    
-  deleteFile(SD, arquivo_tensao_1);
-  deleteFile(SD, arquivo_corrente_1);
-  deleteFile(SD, arquivo_potencia_1);
-
-  writeFile(SD, arquivo_tensao_1, -1);
-  writeFile(SD, arquivo_corrente_1, -1);
-  writeFile(SD, arquivo_potencia_1, -1);
-
-  deleteFile(SD, arquivo_tensao_2);
-  deleteFile(SD, arquivo_corrente_2);
-  deleteFile(SD, arquivo_potencia_2);
-
-  writeFile(SD, arquivo_tensao_2, -1);
-  writeFile(SD, arquivo_corrente_2, -1);
-  writeFile(SD, arquivo_potencia_2, -1);
-
-  deleteFile(SD, arquivo_tensao_3);
-  deleteFile(SD, arquivo_corrente_3);
-  deleteFile(SD, arquivo_potencia_3);
-
-  writeFile(SD, arquivo_tensao_3, -1);
-  writeFile(SD, arquivo_corrente_3, -1);
-  writeFile(SD, arquivo_potencia_3, -1);
-
-  deleteFile(SD, arquivo_tensao_4);
-  deleteFile(SD, arquivo_corrente_4);
-  deleteFile(SD, arquivo_potencia_4);
-
-  writeFile(SD, arquivo_tensao_4, -1);
-  writeFile(SD, arquivo_corrente_4, -1);
-  writeFile(SD, arquivo_potencia_4, -1);
-
-  for(int i = 0; i < tam_vetor; i++){
-    appendFile(SD, arquivo_tensao_1, vetor_tensao_1[i]);
-    appendFile(SD, arquivo_corrente_1, vetor_corrente_1[i]);
-    appendFile(SD, arquivo_potencia_1, vetor_potencia_1[i]);
-
-    appendFile(SD, arquivo_tensao_2, vetor_tensao_2[i]);
-    appendFile(SD, arquivo_corrente_2, vetor_corrente_2[i]);
-    appendFile(SD, arquivo_potencia_2, vetor_potencia_2[i]);
-
-    appendFile(SD, arquivo_tensao_3, vetor_tensao_3[i]);
-    appendFile(SD, arquivo_corrente_3, vetor_corrente_3[i]);
-    appendFile(SD, arquivo_potencia_3, vetor_potencia_3[i]);
-
-    appendFile(SD, arquivo_tensao_4, vetor_tensao_4[i]);
-    appendFile(SD, arquivo_corrente_4, vetor_corrente_4[i]);
-    appendFile(SD, arquivo_potencia_4, vetor_potencia_4[i]);
-  }
-  
 }
 
-void loop(){
+void loop() {
 
+  Serial.println("---------------------------------------");
+  Serial.println(sensor_corrente_1.getDC());
+  Serial.println(sensor_corrente_2.getDC());
+  Serial.println(sensor_corrente_3.getDC());
+  Serial.println(sensor_corrente_4.getDC());
+
+  Serial.println(sensor_tensao_1.getVoltageAC());
+  Serial.println(sensor_tensao_2.getVoltageAC());
+  Serial.println(sensor_tensao_3.getVoltageAC());
+  Serial.println(sensor_tensao_4.getVoltageAC());
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
     return;
   }
 
-  hora_atual = timeinfo.tm_hour - 3;
+  hora_atual = timeinfo.tm_hour - 4;
   if(hora_atual < 0){
-    hora_atual = 24 + timeinfo.tm_hour - 3;
+    hora_atual = 24 + timeinfo.tm_hour - 4;
   }
   min_atual = timeinfo.tm_min;
 
-  //Tomada 1
-  if (hora_atual == hora_ligar_1 && min_atual == min_ligar_1) {
-    digitalWrite(pino_rele_1, HIGH);  
-  }
-  if (hora_atual == hora_desligar_1 && min_atual == min_desligar_1) {
-    digitalWrite(pino_rele_1, LOW);  
-  }
-
-  //Tomada 2
-  if (hora_atual == hora_ligar_2 && min_atual == min_ligar_2) {
-    digitalWrite(pino_rele_2, HIGH);  
-  }
-  if (hora_atual == hora_desligar_2 && min_atual == min_desligar_2) {
-    digitalWrite(pino_rele_2, LOW);  
-  }
-
-  //Tomada 3
-  if (hora_atual == hora_ligar_3 && min_atual == min_ligar_3) {
-    digitalWrite(pino_rele_3, HIGH);  
-  }
-  if (hora_atual == hora_desligar_3 && min_atual == min_desligar_3) {
-    digitalWrite(pino_rele_3, LOW);  
-  }
-
-  // Tomada 4
-  if (hora_atual == hora_ligar_4 && min_atual == min_ligar_4) {
-    digitalWrite(pino_rele_4, HIGH);  
-  }
-  if (hora_atual == hora_desligar_4 && min_atual == min_desligar_4) {
-    digitalWrite(pino_rele_4, LOW); 
-  }
-
-  //Tomada 1
-  tensao_1 = sensor_tensao_1.getVoltageAC();
-  tensao_1 *= 10;
-  tensao_1 -= 2.5;
-  tensao_1 = (float) ((int)(tensao_1 * 100)) /100;
-  corrente_1 = sensor_corrente_1.getAC(60.0, 0.5);
-  corrente_1 /= 10;
-  corrente_1 = (float) ((int)(corrente_1 * 100)) /100;
-  potencia_1 = tensao_1 * corrente_1;
-
-  vetor_tensao_1[pos] = tensao_1;
-  vetor_corrente_1[pos] = corrente_1;
-  vetor_potencia_1[pos] = potencia_1;
-
-  //Tomada 2
-  tensao_2 = sensor_tensao_2.getVoltageAC();
-  tensao_2 *= 10;
-  tensao_2 -= 2.5;
-  tensao_2 = (float) ((int)(tensao_2 * 100)) /100;
-  corrente_2 = sensor_corrente_2.getAC(60.0, 0.5);
-  corrente_2 /= 10;
-  corrente_2 = (float) ((int)(corrente_2 * 100)) /100;
-  potencia_2 = tensao_2 * corrente_2;
-
-  vetor_tensao_2[pos] = tensao_2;
-  vetor_corrente_2[pos] = corrente_2;
-  vetor_potencia_2[pos] = potencia_2;
-
-  //Tomada 3
-  tensao_3 = sensor_tensao_3.getVoltageAC();
-  tensao_3 *= 10;
-  tensao_3 -= 2.5;
-  tensao_3 = (float) ((int)(tensao_3 * 100)) /100;
-  corrente_3 = sensor_corrente_3.getAC(60.0, 0.5);
-  corrente_3 /= 10;
-  corrente_3 = (float) ((int)(corrente_3 * 100)) /100;
-  potencia_3 = tensao_3 * corrente_3;
-
-  vetor_tensao_3[pos] = tensao_3;
-  vetor_corrente_3[pos] = corrente_3;
-  vetor_potencia_3[pos] = potencia_3;
-
-  //Tomada 4
-  tensao_4 = sensor_tensao_4.getVoltageAC();
-  tensao_4 *= 10;
-  tensao_4 -= 2.5;
-  tensao_4 = (float) ((int)(tensao_4 * 100)) /100;
-  corrente_4 = sensor_corrente_4.getAC(60.0, 0.5);
-  corrente_4 /= 10;
-  corrente_4 = (float) ((int)(corrente_4 * 100)) /100;
-  potencia_4 = tensao_4 * corrente_4;
-
-  vetor_tensao_4[pos] = tensao_4;
-  vetor_corrente_4[pos] = corrente_4;
-  vetor_potencia_4[pos] = potencia_4;
-
-  pos++;
-  if(pos == tam_vetor){
-    flag = 1;
-    pos = 0; 
-    comeco = 1;
-  }
-  else if (flag){
-    comeco++;
-    if(comeco == tam_vetor){
-      comeco = 0;
+  // Check if a client has connected
+  WiFiClient client = server.available();
+  
+  if (client) {
+    Serial.println("New Client Connected");
+    String request = "";
+    
+    // Read the request from the client
+    while (client.available()) {
+      char c = client.read();
+      request += c;
     }
-  }
+    
+    Serial.println(request);  // For debugging, print the request
 
-  //--------------------------------------------------Site--------------------------------------------------/
-  WiFiClient client = server.available();   
-  if (client) {                            
-    currentTime = millis();
-    previousTime = currentTime;
-    Serial.println("New Client.");         
-    String currentLine = "";               
-    while (client.connected() && currentTime - previousTime <= timeoutTime) {  
-      currentTime = millis();
-      if (client.available()) {            
-        char c = client.read();           
-        Serial.write(c);                   
-        header += c;
-        if (c == '\n') {                   
-          if (currentLine.length() == 0) {
-            
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println("Connection: close");
-            client.println();
+    if (request.indexOf("GET /ligarTime") >= 0 || request.indexOf("GET /desligarTime") >= 0) {
+      String type = (request.indexOf("desligarTime") >= 0) ? "desligarTime" : "ligarTime";
 
-            client.println("<style>body { text-align: center; font-family: \"Trebuchet MS\", Arial;}");
-            client.println("table { border-collapse: collapse; width:35%; margin-left:auto; margin-right:auto; }");
-            client.println("th { padding: 12px; background-color: #0043af; color: white; }");
-            client.println("tr { border: 1px solid #ddd; padding: 12px; }");
-            client.println("tr:hover { background-color: #bcbcbc; }");
-            client.println("td { border: none; padding: 12px; }");
-            client.println(".sensor { color:black; font-weight: bold; background-color: #e8e6a0; padding: 1px; }");
-            
-            // Web Page Headin
-            client.println("<!DOCTYPE html><html>");
-            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
-            client.println("<link rel=\"icon\" href=\"data:,\">");
-            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
-            client.println(".button { background-color: #4CAF50; border: none; color: white; padding: 16px 40px;");
-            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}");
-            client.println(".button2 {background-color: #555555;}</style></head>");
-            
-   
-            client.println("<body><h1>B.E.M.</h1>");
-            /*
-            client.println("<h1>Tomada 1</h1>");
-            client.println("<form action=\"/set-time\" method=\"GET\">");
-            
-            // Campos para os horários de ligar e desligar
-            client.println("<h3>Tomada 1</h3>");
-            client.println("Hora ligar: <input type=\"number\" name=\"hora_ligar_1\" min=\"0\" max=\"23\"><br>");
-            client.println("Minuto ligar: <input type=\"number\" name=\"min_ligar_1\" min=\"0\" max=\"59\"><br>");
-            client.println("Hora desligar: <input type=\"number\" name=\"hora_desligar_1\" min=\"0\" max=\"23\"><br>");
-            client.println("Minuto desligar: <input type=\"number\" name=\"min_desligar_1\" min=\"0\" max=\"59\"><br><br>");
+      int indexStart = request.indexOf("index=") + 6;
+      int indexEnd = request.indexOf("&", indexStart);
+      int index = request.substring(indexStart, indexEnd).toInt();
 
-            client.println("<input type=\"submit\" value=\"Definir cronograma\">");
-            client.println("</form>");
+      int timeStart = request.indexOf("time=") + 5;
+      String timeValue = request.substring(timeStart, request.indexOf(" ", timeStart));
 
-            client.println("<form action=\"/button-pressed-rele-1\" method=\"GET\"><button type=\"submit\" class=\"button\">Ligar/Desligar Tomada 1</button></form>");
+      int separatorIndex = timeValue.indexOf(':');
+      int hora = timeValue.substring(0, separatorIndex).toInt();
+      int min = timeValue.substring(separatorIndex + 1).toInt();
 
-            if (header.indexOf("GET /set-time") >= 0) {
-              hora_ligar_1 = getParam(header, "hora_ligar_1").toInt();
-              min_ligar_1 = getParam(header, "min_ligar_1").toInt();
-              hora_desligar_1 = getParam(header, "hora_desligar_1").toInt();
-              min_desligar_1 = getParam(header, "min_desligar_1").toInt();
-
-              // Processar os outros horários (tomadas 2, 3 e 4) da mesma forma
-              hora_ligar_2 = getParam(header, "hora_ligar_2").toInt();
-              min_ligar_2 = getParam(header, "min_ligar_2").toInt();
-              hora_desligar_2 = getParam(header, "hora_desligar_2").toInt();
-              min_desligar_2 = getParam(header, "min_desligar_2").toInt();
-
-              hora_ligar_3 = getParam(header, "hora_ligar_3").toInt();
-              min_ligar_3 = getParam(header, "min_ligar_3").toInt();
-              hora_desligar_3 = getParam(header, "hora_desligar_3").toInt();
-              min_desligar_3 = getParam(header, "min_desligar_3").toInt();
-
-              hora_ligar_4 = getParam(header, "hora_ligar_4").toInt();
-              min_ligar_4 = getParam(header, "min_ligar_4").toInt();
-              hora_desligar_4 = getParam(header, "hora_desligar_4").toInt();
-              min_desligar_4 = getParam(header, "min_desligar_4").toInt();
-            }
-
-            if (header.indexOf("GET /button-pressed-rele-1") >= 0) {
-              digitalWrite(pino_rele_1, !digitalRead(pino_rele_1));  // Alterna o estado
-              Serial.println("Relé 1 Alterado");
-            }
-
-            client.println("</body></html>"); */
-
-            client.println("<html><head><style>");
-            client.println("body { font-family: Arial, sans-serif; margin: 20px; }");
-            client.println(".form-container { display: flex; justify-content: space-between; flex-wrap: wrap; }");  // Flexbox com wrap para se ajustar à tela
-            client.println(".form-item { border: 1px solid #ccc; padding: 10px; margin: 5px; width: 23%; box-sizing: border-box; }"); // Cada tomada ocupa 23% da largura
-            client.println("h3 { color: #333; }");
-            client.println("</style></head><body>");
-
-            client.println("<h1>Controle de Tomadas</h1>");
-
-            client.println("<form action=\"/set-time\" method=\"GET\">");  // Formulário para as 4 tomadas
-
-            client.println("<div class=\"form-container\">");
-
-            client.println("<div class=\"form-item\">");
-            client.println("<h3>Tomada 1</h3>");
-            client.print("<h2>Tensao: ");
-            client.print(tensao_1);
-            client.print(" V </h2>");
-            client.print("<h2>Corrente: ");
-            client.print(corrente_1);
-            client.print(" A </h2>");
-            client.print("<h2>Potencia: ");
-            client.print(potencia_1);
-            client.print(" W </h2>");
-            client.println("<form action=\"/button-pressed-rele-1\" method=\"GET\"><button type=\"submit\" class=\"button\">Ligar/Desligar Tomada 1</button></form>");
-            client.println("Hora ligar: <input type=\"number\" value=\"-1\" name=\"hora_ligar_1\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto ligar: <input type=\"number\" value=\"-1\" name=\"min_ligar_1\" min=\"-1\" max=\"59\"><br>");
-            client.println("Hora desligar: <input type=\"number\" value=\"-1\" name=\"hora_desligar_1\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto desligar: <input type=\"number\" value=\"-1\" name=\"min_desligar_1\" min=\"-1\" max=\"59\"><br>");
-
-            client.println("</div>");
-
-            client.println("<div class=\"form-item\">");
-            client.println("<h3>Tomada 2</h3>");
-            client.print("<h2>Tensao: ");
-            client.print(tensao_2);
-            client.print(" V </h2>");
-            client.print("<h2>Corrente: ");
-            client.print(corrente_2);
-            client.print(" A </h2>");
-            client.print("<h2>Potencia: ");
-            client.print(potencia_2);
-            client.print(" W </h2>");
-            client.println("<form action=\"/button-pressed-rele-2\" method=\"GET\"><button type=\"submit\" class=\"button\">Ligar/Desligar Tomada 2</button></form>");
-            client.println("Hora ligar: <input type=\"number\" value=\"-1\" name=\"hora_ligar_2\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto ligar: <input type=\"number\" value=\"-1\" name=\"min_ligar_2\" min=\"-1\" max=\"59\"><br>");
-            client.println("Hora desligar: <input type=\"number\" value=\"-1\" name=\"hora_desligar_2\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto desligar: <input type=\"number\" value=\"-1\" name=\"min_desligar_2\" min=\"-1\" max=\"59\"><br>");
-            client.println("</div>");
-
-            client.println("<div class=\"form-item\">");
-            client.println("<h3>Tomada 3</h3>");
-            client.print("<h2>Tensao: ");
-            client.print(tensao_3);
-            client.print(" V </h2>");
-            client.print("<h2>Corrente: ");
-            client.print(corrente_3);
-            client.print(" A </h2>");
-            client.print("<h2>Potencia: ");
-            client.print(potencia_3);
-            client.print(" W </h2>");
-            client.println("<form action=\"/button-pressed-rele-3\" method=\"GET\"><button type=\"submit\" class=\"button\">Ligar/Desligar Tomada 3</button></form>");
-            client.println("Hora ligar: <input type=\"number\" value=\"-1\" name=\"hora_ligar_3\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto ligar: <input type=\"number\" value=\"-1\" name=\"min_ligar_3\" min=\"-1\" max=\"59\"><br>");
-            client.println("Hora desligar: <input type=\"number\" value=\"-1\" name=\"hora_desligar_3\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto desligar: <input type=\"number\" value=\"-1\" name=\"min_desligar_3\" min=\"-1\" max=\"59\"><br>");
-            client.println("</div>");
-
-            client.println("<div class=\"form-item\">");
-            client.println("<h3>Tomada 4</h3>");
-            client.print("<h2>Tensao: ");
-            client.print(tensao_4);
-            client.print(" V </h2>");
-            client.print("<h2>Corrente: ");
-            client.print(corrente_4);
-            client.print(" A </h2>");
-            client.print("<h2>Potencia: ");
-            client.print(potencia_4);
-            client.print(" W </h2>");
-            client.println("<form action=\"/button-pressed-rele-4\" method=\"GET\"><button type=\"submit\" class=\"button\">Ligar/Desligar Tomada 4</button></form>");
-            client.println("Hora ligar: <input type=\"number\" value=\"-1\" name=\"hora_ligar_4\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto ligar: <input type=\"number\" value=\"-1\" name=\"min_ligar_4\" min=\"-1\" max=\"59\"><br>");
-            client.println("Hora desligar: <input type=\"number\" value=\"-1\" name=\"hora_desligar_4\" min=\"-1\" max=\"23\"><br>");
-            client.println("Minuto desligar: <input type=\"number\" value=\"-1\" name=\"min_desligar_4\" min=\"-1\" max=\"59\"><br>");
-            client.println("</div>");
-
-              // Fecha o container das tomadas lado a lado
-
-            client.println("<br><input type=\"submit\" value=\"Definir cronograma\">");  // Botão único para todas as tomadas
-            client.println("</form>"); 
-            
-            
-            client.println("</div>");
-
-            if (header.indexOf("GET /set-time") >= 0) {
-              hora_ligar_1 = getParam(header, "hora_ligar_1").toInt();
-              min_ligar_1 = getParam(header, "min_ligar_1").toInt();
-              hora_desligar_1 = getParam(header, "hora_desligar_1").toInt();
-              min_desligar_1 = getParam(header, "min_desligar_1").toInt();
-
-              // Processar os outros horários (tomadas 2, 3 e 4) da mesma forma
-              hora_ligar_2 = getParam(header, "hora_ligar_2").toInt();
-              min_ligar_2 = getParam(header, "min_ligar_2").toInt();
-              hora_desligar_2 = getParam(header, "hora_desligar_2").toInt();
-              min_desligar_2 = getParam(header, "min_desligar_2").toInt();
-
-              hora_ligar_3 = getParam(header, "hora_ligar_3").toInt();
-              min_ligar_3 = getParam(header, "min_ligar_3").toInt();
-              hora_desligar_3 = getParam(header, "hora_desligar_3").toInt();
-              min_desligar_3 = getParam(header, "min_desligar_3").toInt();
-
-              hora_ligar_4 = getParam(header, "hora_ligar_4").toInt();
-              min_ligar_4 = getParam(header, "min_ligar_4").toInt();
-              hora_desligar_4 = getParam(header, "hora_desligar_4").toInt();
-              min_desligar_4 = getParam(header, "min_desligar_4").toInt();
-            }
-
-            if (header.indexOf("GET /button-pressed-rele-1") >= 0) {
-              digitalWrite(pino_rele_1, !digitalRead(pino_rele_1));  // Alterna o estado
-              Serial.println("Relé 1 Alterado");
-            }
-            if (header.indexOf("GET /button-pressed-rele-2") >= 0) {
-              digitalWrite(pino_rele_2, !digitalRead(pino_rele_2));  // Alterna o estado
-              Serial.println("Relé 2 Alterado");
-            }
-            if (header.indexOf("GET /button-pressed-rele-3") >= 0) {
-              digitalWrite(pino_rele_3, !digitalRead(pino_rele_3));  // Alterna o estado
-              Serial.println("Relé 3 Alterado");
-            }
-            if (header.indexOf("GET /button-pressed-rele-4") >= 0) {
-              digitalWrite(pino_rele_4, !digitalRead(pino_rele_4));  // Alterna o estado
-              Serial.println("Relé 4 Alterado");
-            }
-
-            if(hora_ligar_1 != -1 && min_ligar_1 != -1){
-              client.print("<h1>Tomada 1 - Hora Ligar: ");
-              client.print(hora_ligar_1);
-              client.print(":");
-              client.print(min_ligar_1);
-              client.print("<\h1>");
-            }
-            if(hora_desligar_1 != -1 && min_desligar_1 != -1){
-              client.print("<h1>Tomada 1 - Hora Desligar: ");
-              client.print(hora_desligar_1);
-              client.print(":");
-              client.print(min_desligar_1);
-              client.print("<\h1>");
-            }
-            
-            if(hora_ligar_2 != -1 && min_ligar_2 != -1){
-              client.print("<h1>Tomada 2 - Hora Ligar: ");
-              client.print(hora_ligar_2);
-              client.print(":");
-              client.print(min_ligar_2);
-              client.print("<\h1>");
-            }
-            if(hora_desligar_2 != -1 && min_desligar_2 != -1){
-              client.print("<h1>Tomada 2 - Hora Desligar: ");
-              client.print(hora_desligar_2);
-              client.print(":");
-              client.print(min_desligar_2);
-              client.print("<\h1>");
-            }
-
-            if(hora_ligar_3 != -1 && min_ligar_3 != -1){
-              client.print("<h1>Tomada 3 - Hora Ligar: ");
-              client.print(hora_ligar_3);
-              client.print(":");
-              client.print(min_ligar_3);
-              client.print("<\h1>");
-            }
-            if(hora_desligar_3 != -1 && min_desligar_3 != -1){
-              client.print("<h1>Tomada 3 - Hora Desligar: ");
-              client.print(hora_desligar_3);
-              client.print(":");
-              client.print(min_desligar_3);
-              client.print("<\h1>");
-            }
-
-            if(hora_ligar_4 != -1 && min_ligar_4 != -1){
-              client.print("<h1>Tomada 4 - Hora Ligar: ");
-              client.print(hora_ligar_4);
-              client.print(":");
-              client.print(min_ligar_4);
-              client.print("<\h1>");
-            }
-            if(hora_desligar_4 != -1 && min_desligar_4 != -1){
-              client.print("<h1>Tomada 4 - Hora Desligar: ");
-              client.print(hora_desligar_4);
-              client.print(":");
-              client.print(min_desligar_4);
-              client.print("<\h1>");
-            }
-
-            client.println("</body></html>");
-            
-            /*
-            
-            client.println("<form action=\"/button-pressed\" method=\"GET\">");
-            client.println("<button type=\"submit\" class=\"button\">Relatorio 5 minutos!</button>");
-            client.println("</form>");
-            
-
-            if (header.indexOf("GET /button-pressed") >= 0) {
-                // Print to Serial Monitor when button is pressed
-              deleteFile(SD, arquivo_tensao_1);
-              deleteFile(SD, arquivo_corrente_1);
-              deleteFile(SD, arquivo_potencia_1);
-
-              deleteFile(SD, arquivo_tensao_2);
-              deleteFile(SD, arquivo_corrente_2);
-              deleteFile(SD, arquivo_potencia_2);
-
-              deleteFile(SD, arquivo_tensao_3);
-              deleteFile(SD, arquivo_corrente_3);
-              deleteFile(SD, arquivo_potencia_3);
-
-              deleteFile(SD, arquivo_tensao_4);
-              deleteFile(SD, arquivo_corrente_4);
-              deleteFile(SD, arquivo_potencia_4);
-
-              writeFile(SD, arquivo_tensao_1, vetor_tensao_1[comeco]);
-              writeFile(SD, arquivo_corrente_1, vetor_corrente_1[comeco]);
-              writeFile(SD, arquivo_potencia_1, vetor_potencia_1[comeco]);
-              
-              writeFile(SD, arquivo_tensao_2, vetor_tensao_2[comeco]);
-              writeFile(SD, arquivo_corrente_2, vetor_corrente_2[comeco]);
-              writeFile(SD, arquivo_potencia_2, vetor_potencia_2[comeco]);
-
-              writeFile(SD, arquivo_tensao_3, vetor_tensao_3[comeco]);
-              writeFile(SD, arquivo_corrente_3, vetor_corrente_3[comeco]);
-              writeFile(SD, arquivo_potencia_3, vetor_potencia_3[comeco]);
-
-              writeFile(SD, arquivo_tensao_4, vetor_tensao_4[comeco]);
-              writeFile(SD, arquivo_corrente_4, vetor_corrente_4[comeco]);
-              writeFile(SD, arquivo_potencia_4, vetor_potencia_4[comeco]);
-
-              for(int i = comeco + 1; i < tam_vetor; i++){
-                if(vetor_tensao_1[i] >= 0 && vetor_corrente_1[i] >= 0 & vetor_potencia_1[i] >= 0){
-                  appendFile(SD, arquivo_tensao_1, vetor_tensao_1[i]);
-                  appendFile(SD, arquivo_corrente_1, vetor_corrente_1[i]);
-                  appendFile(SD, arquivo_potencia_1, vetor_potencia_1[i]);
-                }
-
-                if(vetor_tensao_2[i] >= 0 && vetor_corrente_2[i] >= 0 & vetor_potencia_2[i] >= 0){
-                  appendFile(SD, arquivo_tensao_2, vetor_tensao_2[i]);
-                  appendFile(SD, arquivo_corrente_2, vetor_corrente_2[i]);
-                  appendFile(SD, arquivo_potencia_2, vetor_potencia_2[i]);
-                }
-
-                if(vetor_tensao_3[i] >= 0 && vetor_corrente_3[i] >= 0 & vetor_potencia_3[i] >= 0){
-                  appendFile(SD, arquivo_tensao_3, vetor_tensao_3[i]);
-                  appendFile(SD, arquivo_corrente_3, vetor_corrente_3[i]);
-                  appendFile(SD, arquivo_potencia_3, vetor_potencia_3[i]);
-                }
-
-                if(vetor_tensao_4[i] >= 0 && vetor_corrente_4[i] >= 0 & vetor_potencia_4[i] >= 0){
-                  appendFile(SD, arquivo_tensao_4, vetor_tensao_4[i]);
-                  appendFile(SD, arquivo_corrente_4, vetor_corrente_4[i]);
-                  appendFile(SD, arquivo_potencia_4, vetor_potencia_4[i]);
-                }
-              }
-              for(int i = 0; i < comeco; i++){
-                if(vetor_tensao_1[i] >= 0 && vetor_corrente_1[i] >= 0 & vetor_potencia_1[i] >= 0){
-                  appendFile(SD, arquivo_tensao_1, vetor_tensao_1[i]);
-                  appendFile(SD, arquivo_corrente_1, vetor_corrente_1[i]);
-                  appendFile(SD, arquivo_potencia_1, vetor_potencia_1[i]);
-                }
-
-                if(vetor_tensao_2[i] >= 0 && vetor_corrente_2[i] >= 0 & vetor_potencia_2[i] >= 0){
-                  appendFile(SD, arquivo_tensao_2, vetor_tensao_2[i]);
-                  appendFile(SD, arquivo_corrente_2, vetor_corrente_2[i]);
-                  appendFile(SD, arquivo_potencia_2, vetor_potencia_2[i]);
-                }
-
-                if(vetor_tensao_3[i] >= 0 && vetor_corrente_3[i] >= 0 & vetor_potencia_3[i] >= 0){
-                  appendFile(SD, arquivo_tensao_3, vetor_tensao_3[i]);
-                  appendFile(SD, arquivo_corrente_3, vetor_corrente_3[i]);
-                  appendFile(SD, arquivo_potencia_3, vetor_potencia_3[i]);
-                }
-
-                if(vetor_tensao_4[i] >= 0 && vetor_corrente_4[i] >= 0 & vetor_potencia_4[i] >= 0){
-                  appendFile(SD, arquivo_tensao_4, vetor_tensao_4[i]);
-                  appendFile(SD, arquivo_corrente_4, vetor_corrente_4[i]);
-                  appendFile(SD, arquivo_potencia_4, vetor_potencia_4[i]);
-                }
-              }
-
-              Serial.println("Leitura Tensao");
-              readFile(SD, arquivo_tensao_1);
-              Serial.println("Leitura Corrente");
-              readFile(SD, arquivo_corrente_1);
-              Serial.println("Leitura Potencia");
-              readFile(SD, arquivo_potencia_1);
-          
-              Serial.println("Button Pressed!"); 
-                
-            }
-
-            */
-
-            client.println();
-            break;
-          } 
-          else { 
-            currentLine = "";
-          }
-        } 
-        else if (c != '\r') {  
-          currentLine += c;      
-        }
+      if(type == "ligarTime"){
+        horas_ligar[index] = hora;
+        mins_ligar[index] = min;
       }
+      else{
+        horas_desligar[index] = hora;
+        mins_desligar[index] = min;
+      }
+    } 
+
+    if (request.indexOf("/toggleState") >= 0) {
+      // Parse the index and state from the request
+      int indexStart = request.indexOf("index=") + 6;
+      int indexEnd = request.indexOf("&", indexStart);
+      int index = request.substring(indexStart, indexEnd).toInt();
+
+      String estado = (request.indexOf("Ligado") >= 0) ? "Ligado" : "Desligado";
+      // Update the boolean state
+      if (estado == "Ligado") {
+        tomadaState[index] = true;
+        digitalWrite(pinos_rele[index], HIGH);
+
+      } else if (estado == "Desligado") {
+        tomadaState[index] = false;
+        digitalWrite(pinos_rele[index], LOW);
+      }
+
+      /*
+      // Print the updated state
+      Serial.print("Tomada ");
+      Serial.print(index + 1);
+      Serial.print(" State Updated: ");
+      Serial.println(tomadaState[index] ? "Ligado (true)" : "Desligado (false)");
+      */
     }
-    header = "";
-    client.stop();
-    Serial.println("Client disconnected.");
-    Serial.println("");
+
+    // Serve the HTML page
+    String html = R"rawliteral(
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>B.E.M.</title>
+          <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+          <style>
+              body {
+                  font-family: Arial, sans-serif;
+              }
+              canvas {
+                  max-width: 100%;
+                  margin: 20px auto;
+                  display: block;
+              }
+              .input-section {
+                  text-align: center;
+                  margin-top: 20px;
+              }
+              .result {
+                  text-align: center;
+                  margin-top: 10px;
+                  font-size: 1.2em;
+              }
+              .result strong {
+                  display: block;
+                  margin-top: 10px;
+              }
+              .toggle-section {
+                  display: flex;
+                  justify-content: space-around;
+                  margin-top: 20px;
+              }
+              .toggle-section .section {
+                  text-align: center;
+                  width: 20%;
+              }
+              .toggle-section button {
+                  padding: 10px 20px;
+                  font-size: 1em;
+                  cursor: pointer;
+              }
+              .time-inputs {
+                  text-align: center;
+                  margin-top: 10px;
+              }
+              .time-inputs label {
+                  margin-right: 10px;
+              }
+              .time-display {
+                  text-align: center;
+                  margin-top: 10px;
+                  font-size: 1.2em;
+              }
+          </style>
+      </head>
+      <body>
+
+          <h1 style="text-align: center;">Better Energy Management - B.E.M</h1>
+          <canvas id="wattageChart" width="800" height="400"></canvas>
+
+          <div class="input-section">
+              <label for="multiplier">Calculo de gastos, insira sua tarifa (R$/kWh): </label>
+              <input type="number" id="multiplier" step="0.01" placeholder="Utilize '.' como decimal">
+              <button onclick="calculateSum()">Calcular</button>
+          </div>
+
+          <div id="result" class="result"></div>
+
+          <div class="toggle-section" id="toggle-section">
+              <!-- Each section will be dynamically inserted here for each Tomada -->
+          </div>
+
+          <div id="time-display" class="time-display"></div>
+
+          <script>
+              let toggleState = [false, false, false, false]; // Array to store the state of each button (4 buttons)
+              let ligarTime = [null, null, null, null]; // Array to store ligar time for each outlet
+              let desligarTime = [null, null, null, null]; // Array to store desligar time for each outlet
+
+              // Function to toggle the variable
+              function toggleVariable(index) {
+                  toggleState[index] = !toggleState[index]; // Toggle the state of the specific button
+                  const button = document.getElementById(`toggle-button-${index}`);
+                  button.textContent = toggleState[index] ? 'Ligado' : 'Desligado';
+
+                  const toggleValue = toggleState[index] ? 'Ligado' : 'Desligado';
+
+                  // Send the toggle state to the server
+                  fetch(`/toggleState?index=${index}&state=${toggleValue}`).then(response => {
+                    console.log(`Server response for toggleState:`, response.status);
+                  });
+              }
+
+              // Function to update time values and display the chosen time
+              function updateTime(type, index) {
+                const timeInput = document.getElementById(`${type}-time-${index}`).value;
+                const [hours, minutes] = timeInput.split(':').map(Number);
+
+                if (type === 'ligar') {
+                    ligarTime[index] = { hours, minutes };
+                } else if (type === 'desligar') {
+                    desligarTime[index] = { hours, minutes };
+                }
+
+                updateTimeDisplay(index);
+
+                // Send the updated time to the server
+                const timeValue = `${hours}:${minutes.toString().padStart(2, '0')}`;
+                fetch(`/${type}Time?index=${index}&time=${timeValue}`).then(response => {
+                    console.log(`Server response for ${type}Time:`, response.status);
+                });
+              }   
+
+              // Function to update the time display for a specific outlet
+              function updateTimeDisplay(index) {
+                  const ligarText = ligarTime[index] ? `Ligar: ${ligarTime[index].hours}:${ligarTime[index].minutes.toString().padStart(2, '0')}` : 'Ligar: Não selecionado';
+                  const desligarText = desligarTime[index] ? `Desligar: ${desligarTime[index].hours}:${desligarTime[index].minutes.toString().padStart(2, '0')}` : 'Desligar: Não selecionado';
+                  
+                  document.getElementById(`time-display-${index}`).innerHTML = `${ligarText}<br>${desligarText}`;
+              }
+
+              // Create toggle buttons and time input sections for each outlet (Tomada 1 to 4)
+              window.onload = function() {
+                  const toggleSection = document.getElementById('toggle-section');
+                  const outlets = ['Tomada 1', 'Tomada 2', 'Tomada 3', 'Tomada 4'];
+                  
+                  outlets.forEach((outlet, index) => {
+                      const div = document.createElement('div');
+                      div.classList.add('section');
+                      
+                      // Create the label for each Tomada
+                      const label = document.createElement('h3');
+                      label.textContent = `${outlet}`;
+                      div.appendChild(label);
+                      
+                      // Create the toggle button for each Tomada
+                      const button = document.createElement('button');
+                      button.id = `toggle-button-${index}`;
+                      button.textContent = 'Desligado';
+                      button.onclick = () => toggleVariable(index);
+                      div.appendChild(button);
+
+                      // Create time input section for ligar and desligar
+                      const timeInputs = document.createElement('div');
+                      timeInputs.classList.add('time-inputs');
+
+                      const ligarLabel = document.createElement('label');
+                      ligarLabel.textContent = 'Hora de Ligar:';
+                      timeInputs.appendChild(ligarLabel);
+                      const ligarInput = document.createElement('input');
+                      ligarInput.type = 'time';
+                      ligarInput.id = `ligar-time-${index}`;
+                      ligarInput.onchange = () => updateTime('ligar', index);
+                      timeInputs.appendChild(ligarInput);
+                      timeInputs.appendChild(document.createElement('br'));
+
+                      const desligarLabel = document.createElement('label');
+                      desligarLabel.textContent = 'Hora de Desligar:';
+                      timeInputs.appendChild(desligarLabel);
+                      const desligarInput = document.createElement('input');
+                      desligarInput.type = 'time';
+                      desligarInput.id = `desligar-time-${index}`;
+                      desligarInput.onchange = () => updateTime('desligar', index);
+                      timeInputs.appendChild(desligarInput);
+
+                      div.appendChild(timeInputs);
+
+                      // Create a section to display selected times
+                      const timeDisplay = document.createElement('div');
+                      timeDisplay.id = `time-display-${index}`;
+                      timeDisplay.classList.add('time-display');
+                      div.appendChild(timeDisplay);
+
+                      toggleSection.appendChild(div);
+                  });
+              }
+
+              // Example data for wattage consumption
+              const tomada1 = [4.55, 5.02, 4.88, 5.21, 4.97, 4.63, 4.75, 8.91, 9.12, 7.34, 8.53, 5.61];
+              const tomada2 = [6.01, 6.34, 6.12, 6.29, 6.05, 5.98, 6.1, 6.23, 6.41, 6.52, 5.53, 4.3];
+              const tomada3 = [3.03, 3.35, 3.21, 3.42, 3.19, 3.07, 3.25, 3.39, 3.52, 3.61, 3.7, 3.8];
+              const tomada4 = [1.58, 1.72, 1.66, 18.01, 17.05, 1.69, 1.78, 1.84, 1.91, 1.96, 2.0, 2.04];
+
+              const labels = ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'];
+
+              const ctx = document.getElementById('wattageChart').getContext('2d');
+              const wattageChart = new Chart(ctx, {
+                  type: 'line',
+                  data: {
+                      labels: labels,
+                      datasets: [{
+                          label: 'Tomada 1',
+                          data: tomada1,
+                          borderColor: 'rgba(255, 99, 132, 1)',
+                          backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                          fill: true,
+                          tension: 0.4
+                      }, {
+                          label: 'Tomada 2',
+                          data: tomada2,
+                          borderColor: 'rgba(54, 162, 235, 1)',
+                          backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                          fill: true,
+                          tension: 0.4
+                      }, {
+                          label: 'Tomada 3',
+                          data: tomada3,
+                          borderColor: 'rgba(75, 192, 192, 1)',
+                          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                          fill: true,
+                          tension: 0.4
+                      }, {
+                          label: 'Tomada 4',
+                          data: tomada4,
+                          borderColor: 'rgba(153, 102, 255, 1)',
+                          backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                          fill: true,
+                          tension: 0.4
+                      }]
+                  },
+                  options: {
+                      responsive: true,
+                      scales: {
+                          x: {
+                              title: {
+                                  display: true,
+                                  text: 'Hora'
+                              }
+                          },
+                          y: {
+                              title: {
+                                  display: true,
+                                  text: 'Consumo de Energia (kWh)'
+                              },
+                              min: 0,
+                          }
+                      },
+                      plugins: {
+                          legend: {
+                              position: 'top',
+                          },
+                      }
+                  }
+              });
+
+              function calculateSum() {
+                  const multiplier = parseFloat(document.getElementById('multiplier').value);
+                  if (isNaN(multiplier)) {
+                      document.getElementById('result').textContent = 'Please enter a valid number.';
+                      return;
+                  }
+
+                  const individualSums = [tomada1, tomada2, tomada3, tomada4].map(tomada => 
+                      tomada.reduce((sum, value) => sum + value * multiplier, 0)
+                  );
+
+                  const totalSum = individualSums.reduce((acc, sum) => acc + sum, 0);
+
+                  const resultHTML = individualSums.map((sum, index) => 
+                      `Tomada ${index + 1}: R$ ${sum.toFixed(2)}`
+                  ).join('<br>') + `<br><strong>Total: R$ ${totalSum.toFixed(2)}</strong>`;
+
+                  document.getElementById('result').innerHTML = resultHTML;
+              }
+          </script>
+
+      </body>
+      </html>
+
+    )rawliteral";
+
+
+  for(int tomada = 0; tomada < num_tomadas; tomada++){
+      if (hora_atual == horas_ligar[tomada] && min_atual == mins_ligar[tomada]) {
+        digitalWrite(pinos_rele[tomada], HIGH);  
+      }
+      if (hora_atual == horas_desligar[tomada] && min_atual == mins_desligar[tomada]) {
+        digitalWrite(pinos_rele[tomada], LOW);  
+      }
   }
-  delay(1000);
+
+    // Send HTTP header
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connection: close");
+    client.println();
+
+    // Send the HTML content
+    client.print(html);
+
+    // Wait for the client to disconnect
+    delay(1);
+    client.stop();
+    Serial.println("Client Disconnected");
+  }
+
+  for(int tomada = 0; tomada < num_tomadas; tomada++){
+      if (hora_atual == horas_ligar[tomada] && min_atual == mins_ligar[tomada]) {
+        digitalWrite(pinos_rele[tomada], HIGH);  
+      }
+      if (hora_atual == horas_desligar[tomada] && min_atual == mins_desligar[tomada]) {
+        digitalWrite(pinos_rele[tomada], LOW);  
+      }
+  }
 }
